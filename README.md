@@ -1,12 +1,36 @@
-# Data Warehouse Alimentation Project
+# Data Warehouse Alimentation — College Project
 
-This project implements a complete data warehouse solution using Talend Open Studio for Data Integration and PostgreSQL. The system processes CSV files containing sales data (clients, products, categories, etc.) through an ETL pipeline that loads data into an Operational Data Store (ODS) and then transforms it into a dimensional data warehouse.
+> **AI & Data Science — ETL Pipeline with Talend Open Studio & PostgreSQL**
+
+This repository documents a college project I built as part of my AI and Data Science curriculum. The goal was to design and implement a complete data warehouse solution from scratch — ingesting raw CSV sales data, processing it through an ETL pipeline, and ultimately landing it in a dimensional data warehouse optimized for analytics. It was one of the more technically demanding projects I've worked on so far, and it genuinely shifted how I think about data engineering.
+
+---
+
+## What This Project Does
+
+The system reads CSV files containing sales data (clients, products, categories, transactions, etc.), processes them through a multi-stage ETL pipeline built in **Talend Open Studio for Data Integration**, and loads the results into a **PostgreSQL** database organized across two schemas: an Operational Data Store (ODS) for staging and cleansing, and a dimensional Data Warehouse (DWH) for analytical querying.
+
+It follows the classic three-layer warehouse architecture — Source → ODS → DWH — which sounds straightforward until you're actually building it.
+
+---
+
+## What I Learned
+
+This project was my first real hands-on encounter with ETL pipeline design, and I came away with a much deeper understanding of why data engineering is its own discipline.
+
+**Understanding the ETL logic** was the first wall I hit. It wasn't immediately obvious how to think about data flow across layers — when to validate, when to deduplicate, when to transform versus when to just stage. I spent a significant amount of time mapping out the pipeline on paper before touching any Talend component, which ultimately saved me from several design mistakes down the line. Grasping how `tFileList` orchestrates file iteration, how routing works between components, and how each job fits into the broader orchestration graph (`jChargeODS → jChargeDWH → jAlimentationBDD`) was genuinely instructive.
+
+**Debugging the Java components** was the second — and more frustrating — challenge. Talend's `tJava` components require you to write Java code snippets that execute within the Talend runtime, and when something goes wrong, the error messages are not always forthcoming. I learned to read generated Java stack traces more carefully, to isolate failing rows using logging (`routines.system.ResumeUtil`), and to be far more deliberate about null handling and type casting than I would have been otherwise.
+
+Beyond those two core struggles, I also developed a clearer intuition for dimensional modelling — understanding why fact tables and dimension tables are structured the way they are, and how the time dimension (generated programmatically via `jGenerateCalendar`) connects everything together. The project also reinforced good habits around environment configuration: using context variables for database credentials and paths meant that the pipeline could be adapted to different environments without touching job logic.
+
+---
 
 ## Project Structure
 
 ```
 TalendProjectBigData/
-├── codeForOds.java                     # Java code snippets for tJava components
+├── codeForOds.java                     # Java snippets for tJava components
 ├── customCode.java                     # Custom utility routines
 ├── jGenerateCalendar.zip               # Calendar generation job
 ├── joursFeries.xlsx                    # Holiday reference data
@@ -18,7 +42,7 @@ TalendProjectBigData/
 │   ├── metadata/                       # Database connections and schemas
 │   ├── poms/                           # Maven POMs and generated Java code
 │   └── process/                        # ETL job definitions
-├── csvFiles/                           # Source CSV data files
+├── csvFiles/                           # Source CSV files
 │   ├── ICOM_20250605_CATEGORY.csv
 │   ├── ICOM_20250605_CUSTOMER.csv
 │   ├── ICOM_20250605_PRODUIT.csv
@@ -28,152 +52,128 @@ TalendProjectBigData/
 └── scriptSQL_partie_2/                 # Additional SQL scripts
 ```
 
+---
+
 ## Architecture
 
-The project follows a typical data warehouse architecture with three main layers:
+### Source Layer
+Raw CSV files following the naming convention `ICOM_YYYYMMDD_[ENTITY].csv`, located in `csvFiles/`. Entities include categories, customers, products, sub-categories, customer types, and sales transactions.
 
-### 1. **Source Layer**
+### ODS Layer (Operational Data Store)
+The staging area. Data arrives here from the CSV files, gets validated, cleansed, and deduplicated before any transformation takes place. Jobs use `tFileList` to iterate over files and `routines.system.ResumeUtil` for comprehensive logging. This layer exists precisely so that the DWH never receives dirty data — a principle I came to appreciate only after seeing what happens when you skip it.
 
-- CSV files containing business data with pattern: `ICOM_YYYYMMDD_[ENTITY].csv`
-- Located in [`csvFiles/`](csvFiles/) directory
-- Entities include: categories, customers, products, sub-categories, customer types, and sales data
+### DWH Layer (Data Warehouse)
+The dimensional model. Fact tables (sales transactions) and dimension tables (customers, products, time) are built here from the clean ODS data. This layer is what you'd actually run analytical queries against.
 
-### 2. **ODS Layer (Operational Data Store)**
-
-- Staging area for raw data processing using [`tFileList`](ALIMENTATION_DATA_WAREHOUSE/poms/jobs/process/ODS/jodscategorie_0.1/src/main/java/alimentation_data_warehouse/jodscategorie_0_1/jOdsCategorie.java) components
-- Data validation and cleansing
-- Duplicate detection and removal
-- Comprehensive logging with [`routines.system.ResumeUtil`](ALIMENTATION_DATA_WAREHOUSE/poms/code/routines/src/main/java/routines/system/ResumeUtil.java)
-
-### 3. **DWH Layer (Data Warehouse)**
-
-- Dimensional model with facts and dimensions
-- Optimized for analytical queries
-- Historical data preservation
+---
 
 ## Database Setup
 
 ### PostgreSQL Configuration
 
-1. **Create Database:**
-
 ```sql
 CREATE DATABASE vente_db;
 ```
 
-2. **Database Connections:**
+Three logical connections are used within the project:
 
-   - **VENTE_ODS**: Connection for ODS schema
-   - **VENTE_DWH**: Connection for Data Warehouse schema
-   - **PARAMS_LOG**: Connection for logging and parameters
+- **VENTE_ODS** — ODS schema operations
+- **VENTE_DWH** — Data warehouse schema operations
+- **PARAMS_LOG** — Logging and pipeline parameter tracking
 
-3. **Connection Parameters:**
-   - Host: localhost
-   - Port: 5432
-   - Database: vente_db
-   - Username: [your_username]
-   - Password: [your_password]
+**Connection defaults:**
 
-## Talend Project Structure
+| Parameter | Value |
+|-----------|-------|
+| Host | localhost |
+| Port | 5432 |
+| Database | vente_db |
+| Username | *(your username)* |
+| Password | *(your password)* |
+
+---
+
+## Talend Setup
 
 ### Context Variables
 
-Configure the following context variables in Talend:
+All environment-specific configuration is handled through Talend context variables, which keeps job logic clean and portable:
 
-- `schema_ods`: ODS schema name
-- `schema_dwh`: DWH schema name
-- `database`: Database name (vente_db)
-- `ServerName`: Database server (localhost)
-- `port`: Database port (5432)
-- `utilisateur`: Database username
-- `password`: Database password
-- `projectFolder`: Path to CSV files directory
+| Variable | Purpose |
+|----------|---------|
+| `schema_ods` | ODS schema name |
+| `schema_dwh` | DWH schema name |
+| `database` | Database name (`vente_db`) |
+| `ServerName` | Database host (`localhost`) |
+| `port` | Database port (`5432`) |
+| `utilisateur` | Database username |
+| `password` | Database password |
+| `projectFolder` | Path to the `csvFiles/` directory |
 
-### Job Categories
+### Importing the Project
 
-#### 1. **ODS Jobs** (`/process/ODS/`)
+1. Open Talend Open Studio for Data Integration
+2. Import the `ALIMENTATION_DATA_WAREHOUSE/` project
+3. Navigate to Metadata → Db Connections and configure the three database connections found in `metadata/connections/`
+4. Update context variables to match your local environment
+5. Copy the `routines.customCode` class from `customCode.java` into your Talend project's routines
 
-These jobs extract data from CSV files and load into the ODS layer using the [`tFileList_1Process`](ALIMENTATION_DATA_WAREHOUSE/poms/jobs/process/ODS/jodscategorie_0.1/src/main/java/alimentation_data_warehouse/jodscategorie_0_1/jOdsCategorie.java) method:
+---
 
-- **jOdsCategorie**: Processes category data
-- **jOdsClient**: Processes customer data
-- **jOdsProduit**: Processes product data
-- **jOdsSousCategorie**: Processes sub-category data
-- **jOdsTypeClient**: Processes customer type data
-- **jOdsVente**: Processes sales transaction data
+## Job Overview
 
-#### 2. **DWH Jobs** (`/process/DWH/`)
+### ODS Jobs (`/process/ODS/`)
 
-These jobs transform ODS data into dimensional model:
+These jobs extract data from CSV files and load it into the ODS staging layer:
 
-- **jDwhClient**: Creates customer dimension
-- **jDwhProduit**: Creates product dimension
-- **jDwhVente**: Creates sales fact table
-- **jGenerateCalendar**: Generates time dimension
+- **jOdsCategorie** — Category data
+- **jOdsClient** — Customer data
+- **jOdsProduit** — Product data
+- **jOdsSousCategorie** — Sub-category data
+- **jOdsTypeClient** — Customer type data
+- **jOdsVente** — Sales transaction data
 
-#### 3. **Orchestration Jobs** (`/process/Orechestration/`)
+### DWH Jobs (`/process/DWH/`)
 
-Main orchestration jobs that coordinate the entire pipeline using [`jChargeODS`](ALIMENTATION_DATA_WAREHOUSE/poms/jobs/process/Orechestration/jchargeods_0.1/src/main/java/alimentation_data_warehouse/jchargeods_0_1/jChargeODS.java):
+These jobs transform ODS data into the dimensional model:
 
-- **jChargeODS**: Orchestrates all ODS loading jobs
-- **jChargeDWH**: Orchestrates all DWH transformation jobs
-- **jAlimentationBDD**: Main job that runs the complete pipeline
+- **jDwhClient** — Customer dimension
+- **jDwhProduit** — Product dimension
+- **jDwhVente** — Sales fact table
+- **jGenerateCalendar** — Time dimension (requires `joursFeries.xlsx` for holiday data via `tFileInputExcel`)
 
-## Installation and Setup
+### Orchestration Jobs (`/process/Orechestration/`)
 
-### 1. **Talend Setup**
+- **jChargeODS** — Runs all ODS loading jobs in sequence
+- **jChargeDWH** — Runs all DWH transformation jobs in sequence
+- **jAlimentationBDD** — The top-level job; runs the entire pipeline end-to-end
 
-1. **Import Project:**
+---
 
-   - Open Talend Open Studio for Data Integration
-   - Import the [`ALIMENTATION_DATA_WAREHOUSE`](ALIMENTATION_DATA_WAREHOUSE/) project
+## Running the Pipeline
 
-2. **Configure Database Connections:**
+Once setup is complete:
 
-   - Go to Metadata → Db Connections
-   - Configure the three database connections in [`metadata/DbConnections/`](ALIMENTATION_DATA_WAREHOUSE/metadata/connections/)
+1. Open `jAlimentationBDD` in Talend
+2. Run the job — it will orchestrate the full pipeline automatically
+3. Monitor the console output for logs and progress indicators
 
-3. **Configure Context Variables:**
+To verify results, query:
+- `VENTE_ODS` schema for staged and cleansed data
+- `VENTE_DWH` schema for the dimensional model
 
-   - Update context variables with your environment settings
-   - Ensure `projectFolder` points to your [`csvFiles/`](csvFiles/) directory
+---
 
-4. **Install Custom Routines:**
-   - The project includes custom code in [`customCode.java`](customCode.java)
-   - Copy the [`routines.customCode`](ALIMENTATION_DATA_WAREHOUSE/poms/code/routines/src/main/java/routines/customCode.java) class to your Talend project
+## File Notes
 
-### 2. **File Placement**
+- `codeForOds.java` contains Java snippets meant to be pasted into `tJava` components — comments in the file indicate where each block belongs
+- `jGenerateCalendar.zip` should be imported as a separate Talend job; it depends on `joursFeries.xlsx`
+- Part 3 of the video series (build & scheduling) is not covered in the repository, but the process is straightforward — refer to the final video in the playlist linked below
 
-1. **CSV Files:**
+---
 
-   - Place all CSV files in the [`csvFiles/`](csvFiles/) directory
-   - Files should follow the naming pattern: `ICOM_YYYYMMDD_[ENTITY].csv`
+## Video References
 
-2. **Custom Java Code:**
-
-   - The [`codeForOds.java`](codeForOds.java) file contains Java code snippets used in various tJava components
-   - Copy relevant code blocks into tJava components as specified in the comments
-
-3. **jGenerateCalender:**:
-   - This is used to create the jGenerateCalendar job, but u also need the **joursFeries.xlxs** to load the date to use through the tFileInputExcel component
-
-## Usage Guide
-
-After setting up the project, you can run the main orchestration job:
-
-1. Open the job `jAlimentationBDD` in Talend
-2. Run the job to execute the entire ETL pipeline
-3. Watch the console for logs and progress
-
-To validate your work, check the database for the following:
-
-- ODS tables in the `VENTE_ODS` schema
-- DWH tables in the `VENTE_DWH` schema
-
-## Video References:
-
-- [Part1](https://www.youtube.com/watch?v%3D2Ncg1ieyyZQ&source=gmail&ust=1749221568327000&usg=AOvVaw2miiFjfYEVptjbTy39twTJ)
-- [Part2](https://www.youtube.com/watch?v%3D-CZILJ4swGk&source=gmail&ust=1749221568327000&usg=AOvVaw312oEIcgUhGVLWWhGUSw25)
-- [Part3](https://www.youtube.com/watch?v%3DlGTMhZ22-jM&source=gmail&ust=1749221568327000&usg=AOvVaw2OGMtxmlI6JOoAc6k1sDYs)
-
-**Note:** Part 3 isn’t included in the repository because it focuses on the build and scheduling process. However, it's straightforward to set up — just refer to the last video in the playlist linked above, which walks through everything step by step.
+- [Part 1](https://www.youtube.com/watch?v=2Ncg1ieyyZQ)
+- [Part 2](https://www.youtube.com/watch?v=-CZILJ4swGk)
+- [Part 3](https://www.youtube.com/watch?v=lGTMhZ22-jM) *(build & scheduling — not in repo)*
